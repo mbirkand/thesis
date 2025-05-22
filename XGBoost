@@ -1,0 +1,72 @@
+# === 1. Install XGBoost ===
+!pip install xgboost pandas scikit-learn openpyxl --quiet
+
+# === 2. Import Libraries ===
+import pandas as pd
+from google.colab import files
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import train_test_split
+import xgboost as xgb
+import matplotlib.pyplot as plt
+
+# === 3. Upload Your Training Dataset ===
+print("📥 Upload: Final_Model_Dataset_With_Weather.csv")
+uploaded = files.upload()
+
+# === 4. Load & Process Data ===
+df = pd.read_csv("Final_Model_Dataset_With_Weather.csv")
+
+# Create label from explanation
+df['Final_Outlier'] = df['AI_Historical'].apply(lambda x: 0 if str(x).strip().lower() == 'not applicable' else 1)
+
+# Encode categorical
+for col in ['Area', 'Item']:
+    le = LabelEncoder()
+    df[col] = le.fit_transform(df[col])
+
+# Define features/target
+features = ['Temp_Anomaly', 'Annual_Precipitation', 'Conflict_Flag',
+            'Trade_Shock_Flag', 'Weather_Shock_Flag', 'Area', 'Item', 'Year']
+target = 'Final_Outlier'
+
+X = df[features]
+y = df[target]
+
+# === 5. Train/Test Split & Fit XGBoost ===
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+
+model = xgb.XGBClassifier(n_estimators=100, use_label_encoder=False, eval_metric='logloss')
+model.fit(X_train, y_train)
+
+# === 6. Evaluate ===
+y_pred = model.predict(X_test)
+print("✅ XGBoost Classification Report:")
+print(classification_report(y_test, y_pred))
+print("📉 Confusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+
+# === 7. Plot Feature Importance ===
+xgb.plot_importance(model, importance_type='gain', height=0.6)
+plt.title("🔍 XGBoost Feature Importance")
+plt.tight_layout()
+plt.show()
+
+# === 8. Predict on Future/Unseen Data ===
+print("\n📤 Upload your future/unseen dataset (same columns, no 'Final_Outlier'):")
+uploaded = files.upload()
+
+future = pd.read_csv(list(uploaded.keys())[0])
+
+# Encode 'Area' and 'Item' using training encoders
+future['Area'] = le.transform(future['Area'])
+future['Item'] = le.transform(future['Item'])
+
+# Predict
+future['Predicted_Anomaly'] = model.predict(future[features])
+
+# Save results
+output_name = "Predictions_Future_Data.csv"
+future.to_csv(output_name, index=False)
+files.download(output_name)
+print("✅ Future predictions saved.")
