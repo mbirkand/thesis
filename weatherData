@@ -1,0 +1,121 @@
+# === 1. Upload Excel Files ===
+from google.colab import files
+import pandas as pd
+
+uploaded = files.upload()
+
+# === 2. Load Excel Files ===
+temp_anomaly = pd.read_excel("temperature_anomaly.xlsx")
+precip_annual = pd.read_excel("annual_precipitation.xlsx")
+monthly_weather = pd.read_excel("monthly_temp.xlsx")
+
+# === 3. Standardize Column Names ===
+temp_anomaly.columns = temp_anomaly.columns.str.strip().str.title()
+precip_annual.columns = precip_annual.columns.str.strip().str.title()
+monthly_weather.columns = monthly_weather.columns.str.strip().str.title()
+
+# === 4. Merge Annual Temperature + Precipitation ===
+df_annual = pd.merge(
+    temp_anomaly[['Entity', 'Year', 'Temperature Anomaly']],
+    precip_annual[['Entity', 'Year', 'Annual Precipitation']],
+    on=['Entity', 'Year'],
+    how='outer'
+)
+
+# === 5. Reshape Monthly Weather: Wide → Long ===
+df_monthly_long = monthly_weather.melt(
+    id_vars=['Entity', 'Code', 'Year'],
+    var_name='Month',
+    value_name='Monthly_Value'
+)
+df_monthly_long['Month'] = df_monthly_long['Month'].astype(int)
+
+# === 6. Export to CSV ===
+df_annual.to_csv("Combined_Annual_Weather.csv", index=False)
+df_monthly_long.to_csv("Monthly_Weather_Long_Format.csv", index=False)
+
+# === 7. Download the Outputs ===
+files.download("Combined_Annual_Weather.csv")
+files.download("Monthly_Weather_Long_Format.csv")
+
+
+#Weather Data Merge
+# === STEP 2: Load Files ===
+df_yield = pd.read_excel("_Yield_Anomalies_Trusted (2).xlsx")
+df_climate = pd.read_excel("_CombinedClimateData (1).xlsx")
+
+# === STEP 3: Clean Column Names ===
+df_yield.columns = df_yield.columns.str.strip().str.title()
+df_climate.columns = df_climate.columns.str.strip().str.title()
+
+# === STEP 4: Filter Anomalies and Prepare Climate Data ===
+df_anomalies = df_yield[df_yield['Final_Outlier'] == True][['Area', 'Item', 'Year', 'Anomaly_Type']]
+df_climate_summary = df_climate.groupby(['Entity', 'Year']).agg({
+    'Temperature Anomaly': 'mean',
+    'Annual Precipitation': 'mean'
+}).reset_index().rename(columns={'Entity': 'Area'})
+
+# === STEP 5: Merge Climate with Anomalies ===
+df_anomalies = pd.merge(df_anomalies, df_climate_summary, on=['Area', 'Year'], how='left')
+
+# === STEP 6: Compare to Normal Years (by country only) ===
+rows = []
+for area in df_anomalies['Area'].unique():
+    country_anomalies = df_anomalies[df_anomalies['Area'] == area]
+    country_all = df_climate_summary[df_climate_summary['Area'] == area]
+
+    for _, row in country_anomalies.iterrows():
+        normal_years = country_all[country_all['Year'] != row['Year']]
+
+        if normal_years.empty:
+            rows.append({
+                'Area': area,
+                'Item': row['Item'],
+                'Year': row['Year'],
+                'Anomaly_Type': row['Anomaly_Type'],
+                'Temp_Anomaly': row['Temperature Anomaly'],
+                'Annual_Precipitation': row['Annual Precipitation'],
+                'Avg_Temp_Other_Years': None,
+                'Avg_Rain_Other_Years': None,
+                'Temp_Diff': None,
+                'Rain_Diff': None,
+                'Likely_Cause': "Unclear (no climate baseline)"
+            })
+            continue
+
+        avg_temp = normal_years['Temperature Anomaly'].mean()
+        avg_rain = normal_years['Annual Precipitation'].mean()
+
+        temp_diff = row['Temperature Anomaly'] - avg_temp
+        rain_diff = row['Annual Precipitation'] - avg_rain
+
+        causes = []
+        if temp_diff > 1:
+            causes.append("High temp anomaly")
+        elif temp_diff < -1:
+            causes.append("Low temp anomaly")
+        if rain_diff < -0.2 * avg_rain:
+            causes.append("Low rainfall")
+        elif rain_diff > 0.2 * avg_rain:
+            causes.append("Excess rainfall")
+
+        rows.append({
+            'Area': area,
+            'Item': row['Item'],
+            'Year': row['Year'],
+            'Anomaly_Type': row['Anomaly_Type'],
+            'Temp_Anomaly': row['Temperature Anomaly'],
+            'Annual_Precipitation': row['Annual Precipitation'],
+            'Avg_Temp_Other_Years': avg_temp,
+            'Avg_Rain_Other_Years': avg_rain,
+            'Temp_Diff': temp_diff,
+            'Rain_Diff': rain_diff,
+            'Likely_Cause': "; ".join(causes) if causes else "Unclear"
+        })
+
+df_result = pd.DataFrame(rows)
+
+# === STEP 7: Export Final Output ===
+df_result.to_csv("Explained_Yield_Anomalies_Full.csv", index=False)
+files.download("Explained_Yield_Anomalies_Full.csv")
+
