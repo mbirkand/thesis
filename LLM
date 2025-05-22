@@ -1,0 +1,60 @@
+# === 1. Install & Import ===
+!pip install openai --upgrade --quiet
+
+import pandas as pd
+from google.colab import files
+from openai import OpenAI
+
+# === 2. Enter API Key ===
+api_key = input("Enter your OpenAI API key: ").strip()
+client = OpenAI(api_key=api_key)
+
+# === 3. Upload the file with AI_Explanation already in it ===
+uploaded = files.upload()  # Should be your last version: "Anomalies_With_Weather_And_History.csv"
+df = pd.read_csv(list(uploaded.keys())[0])  
+
+# Optional: Sample subset
+# df = df.head(10)
+
+# === 4. Define Historical Prompt Only ===
+def ask_gpt_historical_reason(row):
+    prompt = f"""
+You are an expert in global agricultural history and food policy.
+
+In {row['Area']}, the yield for {row['Item']} was classified as "{row['Anomaly_Type']}" in the year {row['Year']}.
+
+Climate context:
+- Temperature anomaly: {row['Temp_Anomaly']}°C
+- Annual precipitation: {row['Annual_Precipitation']} mm
+
+Please consider historical events that may have affected this country in {row['Year']}, including:
+- Droughts, floods, or other natural disasters
+- Armed conflict, instability, or displacement
+- Crop disease outbreaks or pest invasions
+- Export bans, trade restrictions, or major policy shifts
+
+Based on this information, provide a short explanation of what might have caused the yield anomaly — or state "no clear historical cause found" if no evidence exists.
+"""
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.4
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"GPT error: {e}"
+
+# === 5. Generate Historical Explanations Only ===
+historical_explanations = []
+for i, row in df.iterrows():
+    print(f" {i+1}/{len(df)} | {row['Area']} - {row['Item']} ({row['Year']})")
+    explanation = ask_gpt_historical_reason(row)
+    historical_explanations.append(explanation)
+
+# Add as new column without touching AI_Explanation
+df['AI_Historical_Explanation'] = historical_explanations
+
+# === 6. Export ===
+df.to_csv("Anomalies_With_Two_AI_Columns.csv", index=False)
+files.download("Anomalies_With_Two_AI_Columns.csv")
