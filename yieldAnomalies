@@ -1,0 +1,98 @@
+from google.colab import files
+import io
+import pandas as pd
+
+# Upload file
+uploaded = files.upload()
+
+# Automatically get the filename
+filename = list(uploaded.keys())[0]
+
+# Read the uploaded CSV
+df = pd.read_csv(io.BytesIO(uploaded[filename]))
+
+# === 1. File Upload ===
+from google.colab import files
+import io
+import pandas as pd
+
+uploaded = files.upload()
+filename = list(uploaded.keys())[0]
+df = pd.read_csv(io.BytesIO(uploaded[filename]))
+
+# === 2. Filter Yield Data ===
+df = df[df["Element"] == "Yield"].copy()
+df['Year'] = df['Year'].astype(int)
+
+# === 3. IQR-Based Anomaly Detection with High/Low Labels ===
+def detect_iqr_outliers(group):
+    q1 = group['Value'].quantile(0.25)
+    q3 = group['Value'].quantile(0.75)
+    iqr = q3 - q1
+    lower = q1 - 1.5 * iqr
+    upper = q3 + 1.5 * iqr
+
+    group['iqr_lower'] = lower
+    group['iqr_upper'] = upper
+    group['is_outlier_iqr'] = ~group['Value'].between(lower, upper)
+
+    # Label the type of anomaly
+    group['anomaly_type'] = None
+    group.loc[group['Value'] < lower, 'anomaly_type'] = 'low'
+    group.loc[group['Value'] > upper, 'anomaly_type'] = 'high'
+    return group
+
+df = df.groupby(['Area', 'Item']).apply(detect_iqr_outliers).reset_index(drop=True)
+
+# === 4. Isolation Forest ===
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
+
+scaler = StandardScaler()
+df['Value_scaled'] = scaler.fit_transform(df[['Value']])
+
+def apply_isolation_forest(group):
+    model = IsolationForest(contamination=0.02, random_state=42)
+    preds = model.fit_predict(group[['Value_scaled']])
+    group['is_outlier_iforest'] = preds == -1
+    return group
+
+df = df.groupby(['Area', 'Item']).apply(apply_isolation_forest).reset_index(drop=True)
+
+# === 5. Final Outliers (Both Methods) ===
+df['final_outlier'] = df['is_outlier_iqr'] & df['is_outlier_iforest']
+outliers = df[df['final_outlier']]
+
+# === 6. Export Final Outliers to Excel ===
+outliers.to_excel("Yield_Anomalies_Trusted.xlsx", index=False)
+files.download("Yield_Anomalies_Trusted.xlsx")
+
+# === 7. Summary Tables ===
+
+# By Area + Item
+summary = outliers.groupby(['Area', 'Item']).size().reset_index(name='Anomaly_Count')
+summary_sorted = summary.sort_values(by='Anomaly_Count', ascending=False)
+
+print(" Top 10 Most Volatile (Area + Item):")
+print(summary_sorted.head(10))
+
+# By Area (country)
+country_summary = summary.groupby('Area')['Anomaly_Count'].sum().reset_index()
+country_summary = country_summary.sort_values(by='Anomaly_Count', ascending=False)
+
+print("\n🌍 Top 10 Countries with Most Yield Anomalies:")
+print(country_summary.head(10))
+
+# By Item (crop)
+item_summary = summary.groupby('Item')['Anomaly_Count'].sum().reset_index()
+item_summary = item_summary.sort_values(by='Anomaly_Count', ascending=False)
+
+print("\n Top 10 Items with Most Yield Anomalies:")
+print(item_summary.head(10))
+
+# === 8. Anomaly Type Breakdown (Low vs High) ===
+type_summary = outliers['anomaly_type'].value_counts().reset_index()
+type_summary.columns = ['Anomaly_Type', 'Count']
+
+print("\n Anomaly Type Breakdown (High vs Low):")
+print(type_summary)
