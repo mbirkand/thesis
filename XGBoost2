@@ -1,0 +1,69 @@
+# === 1. Install Required Libraries ===
+!pip install xgboost pandas scikit-learn openpyxl --quiet
+
+# === 2. Import Libraries ===
+import pandas as pd
+import xgboost as xgb
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
+from sklearn.metrics import classification_report, confusion_matrix, f1_score, make_scorer
+from sklearn.preprocessing import LabelEncoder
+import matplotlib.pyplot as plt
+from google.colab import files
+import pickle
+
+# === 3. Upload Dataset ===
+print("📥 Upload training data: Final_Model_Dataset_With_Weather.csv")
+uploaded = files.upload()
+
+# === 4. Load and Preprocess Dataset ===
+df = pd.read_csv("Final_Model_Dataset_With_Weather.csv")
+df['Final_Outlier'] = df['AI_Historical'].apply(lambda x: 0 if str(x).strip().lower() == 'not applicable' else 1)
+
+# === 5. Encode Categorical Variables ===
+le_area = LabelEncoder()
+le_item = LabelEncoder()
+df['Area'] = le_area.fit_transform(df['Area'])
+df['Item'] = le_item.fit_transform(df['Item'])
+
+# Save encoders if needed later
+pickle.dump(le_area, open("area_encoder.pkl", "wb"))
+pickle.dump(le_item, open("item_encoder.pkl", "wb"))
+
+# === 6. Define Features and Target ===
+features = ['Temp_Anomaly', 'Annual_Precipitation', 'Conflict_Flag',
+            'Trade_Shock_Flag', 'Weather_Shock_Flag', 'Area', 'Item', 'Year']
+target = 'Final_Outlier'
+
+X = df[features]
+y = df[target]
+
+# === 7. Cross-Validation with F1 Scores ===
+model = xgb.XGBClassifier(n_estimators=50, use_label_encoder=False, eval_metric='logloss')
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+f1_macro = cross_val_score(model, X, y, cv=cv, scoring=make_scorer(f1_score, average='macro'))
+f1_weighted = cross_val_score(model, X, y, cv=cv, scoring=make_scorer(f1_score, average='weighted'))
+
+print("Cross-Validation Results (5-Fold):")
+print(f"Macro F1-score:    {f1_macro.mean():.3f} ± {f1_macro.std():.3f}")
+print(f"Weighted F1-score: {f1_weighted.mean():.3f} ± {f1_weighted.std():.3f}")
+
+# === 8. Train/Test Split & Fit Final Model ===
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+model.fit(X_train, y_train)
+
+# Optional: Save model
+model.save_model("model.json")
+
+# === 9. Evaluate Performance ===
+y_pred = model.predict(X_test)
+print("\nFinal Test Set Evaluation:")
+print(classification_report(y_test, y_pred))
+print("Confusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+
+# === 10. Feature Importance Plot ===
+xgb.plot_importance(model, importance_type='gain', height=0.6)
+plt.title("🔍 XGBoost Feature Importance")
+plt.tight_layout()
+plt.show()
