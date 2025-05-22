@@ -1,0 +1,52 @@
+# === 1. Install Dependencies ===
+!pip install pandas openpyxl --quiet
+
+# === 2. Import Required Libraries ===
+import pandas as pd
+from google.colab import files
+
+# === 3. Upload Files ===
+uploaded = files.upload()  # Upload TotalData.csv and _AnomaliesResults.xlsx
+
+# === 4. Load Files ===
+df_full = pd.read_csv("TotalData.csv")
+df_anomalies = pd.read_excel("_AnomaliesResults.xlsx")
+
+# === 5. Clean Column Names ===
+df_full.columns = df_full.columns.str.strip()
+df_anomalies.columns = df_anomalies.columns.str.strip()
+
+# === 6. Extract Explanations ===
+anomaly_ai = df_anomalies[['Area', 'Item', 'Year', 'AI_Historical', 'AI_Weather']].copy()
+
+# === 7. Keyword Flags ===
+def keyword_flag(text, keywords):
+    if pd.isna(text):
+        return 0
+    text = text.lower()
+    return int(any(k in text for k in keywords))
+
+# Conflict & Trade only from AI_Historical
+anomaly_ai['Conflict_Flag'] = anomaly_ai['AI_Historical'].apply(lambda x: keyword_flag(x, ['conflict', 'war', 'instability']))
+anomaly_ai['Trade_Shock_Flag'] = anomaly_ai['AI_Historical'].apply(lambda x: keyword_flag(x, ['ban', 'export', 'tariff', 'embargo']))
+
+# Weather flag from BOTH explanations
+anomaly_ai['Weather_Shock_Flag'] = anomaly_ai.apply(
+    lambda row: keyword_flag(row['AI_Historical'], ['drought', 'flood', 'heatwave', 'storm', 'rainfall', 'dry']) or
+                keyword_flag(row['AI_Weather'], ['drought', 'flood', 'heatwave', 'storm', 'rainfall', 'dry']),
+    axis=1
+)
+
+# === 8. Merge With Full Dataset ===
+df_merged = pd.merge(df_full, anomaly_ai, on=['Area', 'Item', 'Year'], how='left')
+
+# === 9. Fill in Normal Records ===
+df_merged['AI_Historical'] = df_merged['AI_Historical'].fillna("not applicable")
+df_merged['AI_Weather'] = df_merged['AI_Weather'].fillna("not applicable")
+df_merged['Conflict_Flag'] = df_merged['Conflict_Flag'].fillna(0).astype(int)
+df_merged['Trade_Shock_Flag'] = df_merged['Trade_Shock_Flag'].fillna(0).astype(int)
+df_merged['Weather_Shock_Flag'] = df_merged['Weather_Shock_Flag'].fillna(0).astype(int)
+
+# === 10. Export Final File ===
+df_merged.to_csv("Final_Model_Training_Dataset_With_WeatherFlags.csv", index=False)
+files.download("Final_Model_Training_Dataset_With_WeatherFlags.csv")
