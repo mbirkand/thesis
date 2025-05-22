@@ -1,0 +1,59 @@
+# === 1. Install Dependencies ===
+!pip install scikit-learn pandas --quiet
+
+# === 2. Import Libraries ===
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+
+# === 3. Upload Final Merged Dataset ===
+from google.colab import files
+uploaded = files.upload()  # Upload Final_Model_Dataset_With_Weather.csv
+
+# === 4. Load Data ===
+df = pd.read_csv("Final_Model_Dataset_With_Weather.csv")
+
+# === 5. Create Final_Outlier Column Based on AI Explanations ===
+df['Final_Outlier'] = df['AI_Historical'].apply(lambda x: 0 if str(x).strip().lower() == 'not applicable' else 1)
+
+# === 6. Define Features & Target ===
+features = ['Temp_Anomaly', 'Annual_Precipitation',
+            'Conflict_Flag', 'Trade_Shock_Flag', 'Weather_Shock_Flag',
+            'Area', 'Item', 'Year']
+target = 'Final_Outlier'
+
+# === 7. Encode Categorical Features ===
+for col in ['Area', 'Item']:
+    le = LabelEncoder()
+    df[col] = le.fit_transform(df[col])
+
+# === 8. Prepare Data ===
+X = df[features]
+y = df[target]
+
+# === 9. Train/Test Split ===
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+
+# === 10. Train Random Forest Model ===
+model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
+model.fit(X_train, y_train)
+
+# === 11. Evaluate ===
+y_pred = model.predict(X_test)
+print("✅ Classification Report:")
+print(classification_report(y_test, y_pred))
+
+print("📉 Confusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+
+# === 12. Feature Importance ===
+importances = model.feature_importances_
+plt.figure(figsize=(8, 5))
+plt.barh(features, importances)
+plt.title("🔍 Feature Importance (Random Forest)")
+plt.xlabel("Relative Importance")
+plt.tight_layout()
+plt.show()
